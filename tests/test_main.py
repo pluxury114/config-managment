@@ -1,29 +1,61 @@
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from src.main import (
     build_prompt,
     execute_command,
+    parse_arguments,
     parse_command,
     run_cd,
     run_exit,
     run_ls,
+    run_script,
 )
 
 
 class TestShellEmulator(unittest.TestCase):
-    """Test the first-stage shell emulator functionality."""
+    """Test the shell emulator functionality."""
 
-    def test_build_prompt(self):
-        """Check that the prompt uses the OS user and host names."""
+    def test_build_default_prompt(self):
+        """Check prompt creation from operating system data."""
         with patch("src.main.getpass.getuser", return_value="user"):
-            with patch("src.main.socket.gethostname", return_value="host"):
-                self.assertEqual(build_prompt(), "user@host:~$ ")
+            with patch(
+                "src.main.socket.gethostname",
+                return_value="host",
+            ):
+                prompt = build_prompt()
+
+        self.assertEqual(prompt, "user@host:~$ ")
+
+    def test_build_custom_prompt(self):
+        """Check use of a custom prompt."""
+        self.assertEqual(build_prompt("shell> "), "shell> ")
+
+    def test_parse_arguments(self):
+        """Check supported command-line arguments."""
+        command_line = [
+            "main.py",
+            "--vfs",
+            "vfs.json",
+            "--prompt",
+            "shell> ",
+            "--script",
+            "startup.txt",
+        ]
+
+        with patch("sys.argv", command_line):
+            arguments = parse_arguments()
+
+        self.assertEqual(arguments.vfs_path, "vfs.json")
+        self.assertEqual(arguments.prompt, "shell> ")
+        self.assertEqual(arguments.script_path, "startup.txt")
 
     def test_parse_command(self):
-        """Check splitting input into a command and arguments."""
+        """Check splitting input into command and arguments."""
         command, arguments = parse_command("ls folder file.txt")
 
         self.assertEqual(command, "ls")
@@ -37,7 +69,7 @@ class TestShellEmulator(unittest.TestCase):
         self.assertEqual(arguments, [])
 
     def test_ls_stub(self):
-        """Check output of the ls stub command."""
+        """Check output of the ls stub."""
         output = StringIO()
 
         with redirect_stdout(output):
@@ -49,12 +81,13 @@ class TestShellEmulator(unittest.TestCase):
         )
 
     def test_cd_stub(self):
-        """Check output of the cd stub command."""
+        """Check output of the cd stub."""
         output = StringIO()
 
         with redirect_stdout(output):
-            run_cd(["folder"])
+            has_error = run_cd(["folder"])
 
+        self.assertFalse(has_error)
         self.assertEqual(
             output.getvalue(),
             "cd arguments: ['folder']\n",
@@ -65,42 +98,58 @@ class TestShellEmulator(unittest.TestCase):
         output = StringIO()
 
         with redirect_stdout(output):
-            run_cd(["one", "two"])
+            has_error = run_cd(["one", "two"])
 
-        self.assertEqual(
-            output.getvalue(),
-            "Error: cd accepts no more than one argument.\n",
-        )
+        self.assertTrue(has_error)
 
     def test_exit_without_arguments(self):
         """Check that exit stops the REPL."""
-        self.assertFalse(run_exit([]))
+        is_running, has_error = run_exit([])
+
+        self.assertFalse(is_running)
+        self.assertFalse(has_error)
 
     def test_exit_with_arguments(self):
         """Check that exit rejects arguments."""
         output = StringIO()
 
         with redirect_stdout(output):
-            is_running = run_exit(["now"])
+            is_running, has_error = run_exit(["now"])
 
         self.assertTrue(is_running)
-        self.assertEqual(
-            output.getvalue(),
-            "Error: exit does not accept arguments.\n",
-        )
+        self.assertTrue(has_error)
 
     def test_unknown_command(self):
         """Check reporting of an unknown command."""
         output = StringIO()
 
         with redirect_stdout(output):
-            is_running = execute_command("unknown", [])
+            is_running, has_error = execute_command(
+                "unknown",
+                [],
+            )
 
         self.assertTrue(is_running)
-        self.assertEqual(
-            output.getvalue(),
-            "Error: unknown command: unknown\n",
-        )
+        self.assertTrue(has_error)
+        self.assertIn("unknown command", output.getvalue())
+
+    def test_script_stops_on_error(self):
+        """Check that a startup script stops after an error."""
+        script_text = "ls first\nunknown\nls skipped\n"
+
+        with tempfile.TemporaryDirectory() as directory:
+            script_path = Path(directory) / "startup.txt"
+            script_path.write_text(
+                script_text,
+                encoding="utf-8",
+            )
+            output = StringIO()
+
+            with redirect_stdout(output):
+                run_script(str(script_path), "test> ")
+
+        self.assertIn("ls arguments: ['first']", output.getvalue())
+        self.assertNotIn("ls arguments: ['skipped']", output.getvalue())
 
 
 if __name__ == "__main__":

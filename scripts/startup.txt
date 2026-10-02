@@ -1,0 +1,3 @@
+ls folder
+cd documents
+exit
