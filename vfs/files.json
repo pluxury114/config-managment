@@ -1,0 +1,18 @@
+{
+  "type": "directory",
+  "children": {
+    "readme.txt": {
+      "type": "file",
+      "content": "Virtual file system"
+    },
+    "notes.txt": {
+      "type": "file",
+      "content": "Configuration management"
+    },
+    "data.bin": {
+      "type": "file",
+      "encoding": "base64",
+      "content": "AAECAwQ="
+    }
+  }
+}

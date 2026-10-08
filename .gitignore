@@ -28,3 +28,6 @@ dist/
 # Operating system files
 Thumbs.db
 .DS_Store
+
+# Workspace files
+*.code-workspace

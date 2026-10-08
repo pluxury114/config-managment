@@ -1,0 +1,24 @@
+{
+  "type": "directory",
+  "children": {
+    "home": {
+      "type": "directory",
+      "children": {
+        "user": {
+          "type": "directory",
+          "children": {
+            "documents": {
+              "type": "directory",
+              "children": {
+                "report.txt": {
+                  "type": "file",
+                  "content": "Deep VFS example"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

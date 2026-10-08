@@ -1,10 +1,58 @@
 import argparse
 import getpass
 import socket
+import json
 
 
 MAX_CD_ARGUMENTS = 1
 
+
+def load_vfs(vfs_path):
+    """Load a virtual file system from a JSON file."""
+    if vfs_path is None:
+        return None
+
+    try:
+        with open(vfs_path, encoding="utf-8") as vfs_file:
+            vfs = json.load(vfs_file)
+    except FileNotFoundError:
+        print(f"Error: VFS file not found: {vfs_path}")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error: invalid VFS format: {vfs_path}")
+        return None
+
+    if not validate_vfs(vfs):
+        print(f"Error: invalid VFS structure: {vfs_path}")
+        return None
+
+    return vfs
+
+
+def validate_node(node):
+    """Check one file or directory node of the VFS."""
+    if not isinstance(node, dict):
+        return False
+
+    node_type = node.get("type")
+
+    if node_type == "directory":
+        children = node.get("children")
+
+        if not isinstance(children, dict):
+            return False
+
+        return all(validate_node(child) for child in children.values())
+
+    if node_type == "file":
+        return isinstance(node.get("content"), str)
+
+    return False
+
+
+def validate_vfs(vfs):
+    """Check the complete virtual file system structure."""
+    return validate_node(vfs)
 
 def parse_arguments():
     """Parse command-line arguments of the emulator."""
@@ -142,6 +190,11 @@ def main():
     """Configure and run the shell emulator."""
     arguments = parse_arguments()
     print_configuration(arguments)
+
+    vfs = load_vfs(arguments.vfs_path)
+
+    if arguments.vfs_path and vfs is None:
+        return
 
     prompt = build_prompt(arguments.prompt)
 
