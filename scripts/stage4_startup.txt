@@ -1,0 +1,13 @@
+clear
+ls
+cd home
+ls
+cd user
+ls
+cd documents
+ls
+ls report.txt
+cd ..
+echo stage 4 works
+history
+cd missing

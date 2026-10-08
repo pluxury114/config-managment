@@ -1,10 +1,14 @@
 import argparse
 import getpass
-import socket
 import json
+import os
+import socket
 
 
 MAX_CD_ARGUMENTS = 1
+MAX_LS_ARGUMENTS = 1
+PARENT_DIRECTORY = ".."
+ROOT_PATH = "/"
 
 
 def load_vfs(vfs_path):
@@ -53,6 +57,76 @@ def validate_node(node):
 def validate_vfs(vfs):
     """Check the complete virtual file system structure."""
     return validate_node(vfs)
+
+
+def create_default_vfs():
+    """Create an empty virtual file system in memory."""
+    return {
+        "type": "directory",
+        "children": {},
+    }
+
+
+def create_shell_state(vfs):
+    """Create the initial state of the shell emulator."""
+    return {
+        "vfs": vfs,
+        "current_path": [],
+        "history": [],
+    }
+
+
+def normalize_path(current_path, path):
+    """Convert a shell path to a normalized VFS path."""
+    if path.startswith(ROOT_PATH):
+        result = []
+    else:
+        result = current_path.copy()
+
+    for part in path.split("/"):
+        if not part or part == ".":
+            continue
+
+        if part == PARENT_DIRECTORY:
+            if result:
+                result.pop()
+            continue
+
+        result.append(part)
+
+    return result
+
+
+def get_node(vfs, path):
+    """Return a VFS node located at the specified path."""
+    node = vfs
+
+    for part in path:
+        if node.get("type") != "directory":
+            return None
+
+        children = node.get("children", {})
+
+        if part not in children:
+            return None
+
+        node = children[part]
+
+    return node
+
+
+def resolve_path(state, path):
+    """Resolve a shell path and return its VFS node and path."""
+    target_path = normalize_path(
+        state["current_path"],
+        path,
+    )
+    node = get_node(
+        state["vfs"],
+        target_path,
+    )
+    return node, target_path
+
 
 def parse_arguments():
     """Parse command-line arguments of the emulator."""
@@ -104,18 +178,75 @@ def parse_command(user_input):
     return parts[0], parts[1:]
 
 
-def run_ls(arguments):
-    """Print the name and arguments of the ls stub command."""
-    print(f"ls arguments: {arguments}")
+def run_ls(arguments, state):
+    """List files and directories in the virtual file system."""
+    if len(arguments) > MAX_LS_ARGUMENTS:
+        print("Error: ls accepts no more than one argument.")
+        return True
+
+    target = arguments[0] if arguments else "."
+    node, _ = resolve_path(state, target)
+
+    if node is None:
+        print(f"Error: ls: path not found: {target}")
+        return True
+
+    if node["type"] == "file":
+        print(target)
+        return False
+
+    names = sorted(node["children"])
+    print(" ".join(names))
+    return False
 
 
-def run_cd(arguments):
-    """Print cd arguments and report whether an error occurred."""
+def run_cd(arguments, state):
+    """Change the current directory in the virtual file system."""
     if len(arguments) > MAX_CD_ARGUMENTS:
         print("Error: cd accepts no more than one argument.")
         return True
 
-    print(f"cd arguments: {arguments}")
+    target = arguments[0] if arguments else ROOT_PATH
+    node, target_path = resolve_path(state, target)
+
+    if node is None:
+        print(f"Error: cd: path not found: {target}")
+        return True
+
+    if node["type"] != "directory":
+        print(f"Error: cd: not a directory: {target}")
+        return True
+
+    state["current_path"] = target_path
+    return False
+
+
+def run_echo(arguments):
+    """Print command arguments to the console."""
+    print(" ".join(arguments))
+    return False
+
+
+def run_clear(arguments):
+    """Clear the terminal screen."""
+    if arguments:
+        print("Error: clear does not accept arguments.")
+        return True
+
+    clear_command = "cls" if os.name == "nt" else "clear"
+    os.system(clear_command)
+    return False
+
+
+def run_history(arguments, state):
+    """Print commands entered during the current session."""
+    if arguments:
+        print("Error: history does not accept arguments.")
+        return True
+
+    for index, command in enumerate(state["history"], start=1):
+        print(f"{index} {command}")
+
     return False
 
 
@@ -128,18 +259,22 @@ def run_exit(arguments):
     return False, False
 
 
-def execute_command(command, arguments):
+def execute_command(command, arguments, state):
     """Execute a command and return running and error states."""
-    if not command:
-        return True, False
-
     if command == "ls":
-        run_ls(arguments)
-        return True, False
+        return True, run_ls(arguments, state)
 
     if command == "cd":
-        has_error = run_cd(arguments)
-        return True, has_error
+        return True, run_cd(arguments, state)
+
+    if command == "echo":
+        return True, run_echo(arguments)
+
+    if command == "clear":
+        return True, run_clear(arguments)
+
+    if command == "history":
+        return True, run_history(arguments, state)
 
     if command == "exit":
         return run_exit(arguments)
@@ -148,23 +283,40 @@ def execute_command(command, arguments):
     return True, True
 
 
-def run_repl(prompt):
+def execute_input(user_input, state):
+    """Parse and execute one line of shell input."""
+    command, arguments = parse_command(user_input)
+
+    if not command:
+        return True, False
+
+    state["history"].append(user_input.strip())
+    return execute_command(
+        command,
+        arguments,
+        state,
+    )
+
+
+def run_repl(prompt, state):
     """Run the interactive shell loop."""
     is_running = True
 
     while is_running:
         user_input = input(prompt)
-        command, arguments = parse_command(user_input)
-        is_running, _ = execute_command(command, arguments)
+        is_running, _ = execute_input(
+            user_input,
+            state,
+        )
 
 
-def run_script(script_path, prompt):
+def run_script(script_path, prompt, state):
     """Run startup commands until completion, exit, or an error."""
     try:
         script_file = open(script_path, encoding="utf-8")
     except OSError:
         print(f"Error: cannot open startup script: {script_path}")
-        return True
+        return False
 
     with script_file:
         for raw_line in script_file:
@@ -174,10 +326,9 @@ def run_script(script_path, prompt):
                 continue
 
             print(f"{prompt}{user_input}")
-            command, arguments = parse_command(user_input)
-            is_running, has_error = execute_command(
-                command,
-                arguments,
+            is_running, has_error = execute_input(
+                user_input,
+                state,
             )
 
             if has_error or not is_running:
@@ -196,17 +347,22 @@ def main():
     if arguments.vfs_path and vfs is None:
         return
 
+    if vfs is None:
+        vfs = create_default_vfs()
+
+    state = create_shell_state(vfs)
     prompt = build_prompt(arguments.prompt)
 
     if arguments.script_path:
         is_running = run_script(
             arguments.script_path,
             prompt,
+            state,
         )
         if not is_running:
             return
 
-    run_repl(prompt)
+    run_repl(prompt, state)
 
 
 if __name__ == "__main__":
