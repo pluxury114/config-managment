@@ -1,0 +1,4 @@
+echo Stage 5 - expected mv error
+ls /
+mv /home /home/user
+echo THIS_MUST_NOT_RUN

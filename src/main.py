@@ -5,6 +5,7 @@ import os
 import socket
 
 
+MAX_MV_ARGUMENTS = 2
 MAX_CD_ARGUMENTS = 1
 MAX_LS_ARGUMENTS = 1
 PARENT_DIRECTORY = ".."
@@ -221,6 +222,68 @@ def run_cd(arguments, state):
     return False
 
 
+def get_mv_destination(state, destination, source_path):
+    """Find a valid in-memory destination for mv."""
+    destination_node, target_path = resolve_path(state, destination)
+    if destination.endswith("/") and destination_node is None:
+        print(f"Error: mv: destination directory not found: {destination}")
+        return None
+
+    if destination_node is not None:
+        if destination_node["type"] != "directory":
+            print(f"Error: mv: destination already exists: {destination}")
+            return None
+        target_path = target_path + [source_path[-1]]
+
+    if not target_path:
+        print("Error: mv: cannot replace the VFS root.")
+        return None
+
+    parent = get_node(state["vfs"], target_path[:-1])
+    if parent is None or parent["type"] != "directory":
+        print(f"Error: mv: invalid destination: {destination}")
+        return None
+
+    if target_path[-1] in parent["children"]:
+        print(f"Error: mv: destination already exists: {destination}")
+        return None
+
+    return target_path, parent
+
+
+def run_mv(arguments, state):
+    """Move or rename an entry inside the in-memory VFS."""
+    if len(arguments) != MAX_MV_ARGUMENTS:
+        print("Error: mv requires exactly two arguments.")
+        return True
+
+    source, destination = arguments
+    source_node, source_path = resolve_path(state, source)
+    if source_node is None or not source_path:
+        print(f"Error: mv: source not found or is root: {source}")
+        return True
+
+    target_info = get_mv_destination(state, destination, source_path)
+    if target_info is None:
+        return True
+
+    target_path, new_parent = target_info
+    if (source_node["type"] == "directory"
+            and target_path[:len(source_path)] == source_path):
+        print("Error: mv: cannot move a directory into itself.")
+        return True
+
+    old_parent = get_node(state["vfs"], source_path[:-1])
+    moving_node = old_parent["children"].pop(source_path[-1])
+    new_parent["children"][target_path[-1]] = moving_node
+
+    if state["current_path"][:len(source_path)] == source_path:
+        suffix = state["current_path"][len(source_path):]
+        state["current_path"] = target_path + suffix
+
+    return False
+
+
 def run_echo(arguments):
     """Print command arguments to the console."""
     print(" ".join(arguments))
@@ -266,6 +329,9 @@ def execute_command(command, arguments, state):
 
     if command == "cd":
         return True, run_cd(arguments, state)
+
+    if command == "mv":
+        return True, run_mv(arguments, state)
 
     if command == "echo":
         return True, run_echo(arguments)

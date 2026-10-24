@@ -1,0 +1,15 @@
+clear
+echo Stage 5 - in-memory mv demonstration
+ls /
+cd /home/user/documents
+ls
+mv report.txt final.txt
+ls
+mv final.txt /home/user
+ls /home/user
+mv /home/user /newuser
+ls /
+ls /newuser
+cd /newuser
+history
+exit
